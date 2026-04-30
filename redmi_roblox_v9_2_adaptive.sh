@@ -83,25 +83,6 @@ system:min_refresh_rate
 system:peak_refresh_rate
 system:user_refresh_rate
 system:miui_refresh_rate
-global:high_touch_mode
-secure:miui_touch_boost
-secure:game_touch_mode
-secure:game_turbo_touch_sensitivity
-global:input.instant_touch_response
-global:input.touch_boost
-system:input.touch_boost
-global:touch.sampling_boost
-global:touch.polling_rate
-global:touch_sampling_rate_override
-global:touch_response_rate
-global:touch_rate_control
-global:windowsmgr.support_low_latency_touch
-system:touch_sampling_rate
-system:touch_sampling_rate_override
-system:devices_virtual_input_input1_polling_rate
-system:input.high_update_rate
-system:touch_response_rate
-system:touch_rate_control
 "
 
 mkdir -p "$BASE" 2>/dev/null
@@ -331,29 +312,6 @@ apply_refresh_120() {
 }
 
 apply_touch_common() {
-    try settings put global high_touch_mode 1
-    try settings put secure miui_touch_boost 1
-    try settings put secure game_touch_mode 1
-    try settings put secure game_turbo_touch_sensitivity 3
-
-    try settings put global input.instant_touch_response 1
-    try settings put global input.touch_boost 1
-    try settings put system input.touch_boost 1
-
-    try settings put global touch.sampling_boost 1
-    try settings put global touch.polling_rate 240
-    try settings put global touch_sampling_rate_override 1
-    try settings put global touch_response_rate 1
-    try settings put global touch_rate_control 0
-    try settings put global windowsmgr.support_low_latency_touch 1
-
-    try settings put system touch_sampling_rate 240
-    try settings put system touch_sampling_rate_override 1
-    try settings put system devices_virtual_input_input1_polling_rate 240
-    try settings put system input.high_update_rate true
-    try settings put system touch_response_rate 1
-    try settings put system touch_rate_control 0
-
     try setprop debug.input.resampling false
     try setprop debug.input.touch_prediction false
     try setprop debug.velocitytracker.strategy impulse
@@ -576,10 +534,12 @@ engage() {
 }
 
 fresh_reset() {
-    log "Fresh reset: stopping daemon and clearing v9.2 state only"
+    log "Fresh reset: stopping daemon and clearing stale v9.2 runtime/state files"
     stop_daemon_only
     stop_legacy_pidfiles
     rm -f "$STATE"
+    rm -f "$STATE.tmp"
+    rm -f "$PIDFILE"
     engage
 }
 
