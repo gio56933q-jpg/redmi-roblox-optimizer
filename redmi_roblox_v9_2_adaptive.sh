@@ -7,7 +7,7 @@
 # - Roblox com.roblox.client
 # - GameManager custom mode, downscale 0.25, FPS 120
 # - 120 Hz refresh settings
-# - max_events_per_sec 9999
+# - max_events_per_sec 1600
 # - input resampling false, touch prediction false, velocitytracker impulse
 # - debug.tp.grip_enable 90
 # - aggressive SurfaceFlinger low-wait props
@@ -30,7 +30,7 @@ PIDFILE="$BASE/redmi_roblox_v9_2_adaptive.pid"
 DOWN_FULL="0.25"
 FPS_FULL="120"
 FPS_SAVER="60"
-EVENTS_FULL="9999"
+EVENTS_FULL="1600"
 EVENTS_SAVER="480"
 GRIP_DEFAULT="90"
 
@@ -450,16 +450,19 @@ daemon_loop() {
         LP="$(settings get global low_power 2>/dev/null)"
         [ -z "$LP" ] && LP="0"
 
-        if [ "$LP" != "$LAST" ]; then
-            if [ "$LP" = "1" ]; then
-                apply_saver_profile
-            else
-                apply_full_profile
-            fi
-            LAST="$LP"
+        if [ "$LP" = "1" ]; then
+            apply_touch_common
+            apply_events "$EVENTS_SAVER"
+            apply_grip "$GRIP_DEFAULT"
+            apply_roblox_game "$DOWN_FULL" "$FPS_SAVER"
         else
-            apply_roblox_priority
+            apply_touch_common
+            apply_events "$EVENTS_FULL"
+            apply_grip "$GRIP_DEFAULT"
+            apply_roblox_game "$DOWN_FULL" "$FPS_FULL"
         fi
+        apply_roblox_priority
+        LAST="$LP"
 
         sleep 15
     done
@@ -560,7 +563,10 @@ ensure_state_for_mode() {
 
 mode_events() {
     ensure_state_for_mode
+    apply_touch_common
     apply_events "$1"
+    apply_grip "$GRIP_DEFAULT"
+    apply_roblox_priority
     verify
 }
 
@@ -576,6 +582,33 @@ mode_grip() {
     ensure_state_for_mode
     apply_grip "$1"
     verify
+}
+
+mode_diag() {
+    verify
+}
+
+mode_gfx() {
+    PID="$(pidof "$GAME" 2>/dev/null | awk '{print $1}')"
+    if [ -n "$PID" ]; then
+        dumpsys gfxinfo "$GAME" 2>/dev/null | grep -E 'Total frames rendered|Janky frames|90th percentile|95th percentile|99th percentile|Number High input latency|Number Missed Vsync' | head -40
+    else
+        echo "Roblox not running; gfxinfo skipped."
+    fi
+}
+
+mode_thermal() {
+    dumpsys thermalservice 2>/dev/null | head -120
+}
+
+mode_probe() {
+    if [ -f "$BASE/scripts/rb_capability_probe_v1.sh" ]; then
+        sh "$BASE/scripts/rb_capability_probe_v1.sh"
+    elif [ -f "./scripts/rb_capability_probe_v1.sh" ]; then
+        sh "./scripts/rb_capability_probe_v1.sh"
+    else
+        echo "probe script not found: scripts/rb_capability_probe_v1.sh"
+    fi
 }
 
 verify() {
@@ -660,6 +693,9 @@ case "${1:-engage}" in
     events9999)
         mode_events 9999
         ;;
+    events1200)
+        mode_events 1200
+        ;;
     scale025)
         mode_scale 0.25
         ;;
@@ -675,6 +711,18 @@ case "${1:-engage}" in
     grip150)
         mode_grip 150
         ;;
+    probe)
+        mode_probe
+        ;;
+    diag)
+        mode_diag
+        ;;
+    gfx)
+        mode_gfx
+        ;;
+    thermal)
+        mode_thermal
+        ;;
     killdaemon)
         stop_daemon_only
         echo "daemon stopped"
@@ -686,9 +734,10 @@ case "${1:-engage}" in
         echo "  sh $0 stop        # stop daemon and restore saved baseline"
         echo "  sh $0 verify"
         echo "  sh $0 full|saver"
-        echo "  sh $0 events480|events1600|events9999"
+        echo "  sh $0 events480|events1200|events1600|events9999"
         echo "  sh $0 scale025|scale035"
         echo "  sh $0 grip90|grip120|grip150"
+        echo "  sh $0 probe|diag|gfx|thermal"
         ;;
 esac
 
