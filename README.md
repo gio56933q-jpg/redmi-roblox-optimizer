@@ -30,3 +30,14 @@ No-root Roblox optimizer for Redmi 15 4G (HyperOS 3 / Android 16) with Shizuku s
   - `sh /storage/emulated/0/Download/scripts/rb_capability_probe_v1.sh`
 - Probe prints PASS/FAIL/UNKNOWN and restores temporary prop tests.
 - Probe is not a performance claim; use A/B logs before promoting candidates.
+
+## GitHub sync troubleshooting (Termux)
+- If GitHub says your PR branch has conflicts but your local repo is on `main`, first confirm branch:
+  - `git branch --show-current`
+- Sync local `main` with remote:
+  - `git fetch origin`
+  - `git merge origin/main`
+- If you typed two commands on one line by accident (for example `origin/maingit ...`), re-run the command cleanly on its own line.
+- If `git commit` fails with "Author identity unknown", set identity once:
+  - `git config --global user.name "YOUR_NAME"`
+  - `git config --global user.email "YOUR_EMAIL"`

@@ -1,5 +1,9 @@
 # Changelog
 
+## v9.2.2
+- Added a Termux GitHub sync troubleshooting section to `README.md` with exact conflict-recovery commands (`fetch`, `merge origin/main`) and commit identity setup guidance.
+- Clarified common command-entry mistake handling (accidental concatenated commands on a single line) to reduce false merge/push failures.
+
 ## v9.2.1
 - Changed default full event profile from `9999` to `1600` based on latest on-device A/B evidence.
 - Kept `events9999` as optional test mode.
