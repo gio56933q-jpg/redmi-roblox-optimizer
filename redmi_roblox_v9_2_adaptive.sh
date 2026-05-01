@@ -454,14 +454,11 @@ daemon_loop() {
             apply_touch_common
             apply_events "$EVENTS_SAVER"
             apply_grip "$GRIP_DEFAULT"
-            apply_roblox_game "$DOWN_FULL" "$FPS_SAVER"
         else
             apply_touch_common
             apply_events "$EVENTS_FULL"
             apply_grip "$GRIP_DEFAULT"
-            apply_roblox_game "$DOWN_FULL" "$FPS_FULL"
         fi
-        apply_roblox_priority
         LAST="$LP"
 
         sleep 15
@@ -726,6 +723,12 @@ case "${1:-engage}" in
     thermal)
         mode_thermal
         ;;
+    priority)
+        ensure_state_for_mode
+        apply_roblox_game "$DOWN_FULL" "$FPS_FULL"
+        apply_roblox_priority
+        verify
+        ;;
     killdaemon)
         stop_daemon_only
         echo "daemon stopped"
@@ -740,7 +743,7 @@ case "${1:-engage}" in
         echo "  sh $0 events480|events1200|events1600|events9999"
         echo "  sh $0 scale025|scale035"
         echo "  sh $0 grip0|grip90|grip120|grip150"
-        echo "  sh $0 probe|diag|gfx|thermal"
+        echo "  sh $0 probe|diag|gfx|thermal|priority"
         ;;
 esac
 
