@@ -7,7 +7,7 @@
 # - Roblox com.roblox.client
 # - GameManager custom mode, downscale 0.25, FPS 120
 # - 120 Hz refresh settings
-# - max_events_per_sec 9999
+# - max_events_per_sec 1600
 # - input resampling false, touch prediction false, velocitytracker impulse
 # - debug.tp.grip_enable 90
 # - aggressive SurfaceFlinger low-wait props
@@ -30,9 +30,9 @@ PIDFILE="$BASE/redmi_roblox_v9_2_adaptive.pid"
 DOWN_FULL="0.25"
 FPS_FULL="120"
 FPS_SAVER="60"
-EVENTS_FULL="9999"
+EVENTS_FULL="1600"
 EVENTS_SAVER="480"
-GRIP_DEFAULT="90"
+GRIP_DEFAULT="0"
 
 RB_NULL="__RB_NULL__"
 RB_EMPTY="__RB_EMPTY__"
@@ -83,25 +83,6 @@ system:min_refresh_rate
 system:peak_refresh_rate
 system:user_refresh_rate
 system:miui_refresh_rate
-global:high_touch_mode
-secure:miui_touch_boost
-secure:game_touch_mode
-secure:game_turbo_touch_sensitivity
-global:input.instant_touch_response
-global:input.touch_boost
-system:input.touch_boost
-global:touch.sampling_boost
-global:touch.polling_rate
-global:touch_sampling_rate_override
-global:touch_response_rate
-global:touch_rate_control
-global:windowsmgr.support_low_latency_touch
-system:touch_sampling_rate
-system:touch_sampling_rate_override
-system:devices_virtual_input_input1_polling_rate
-system:input.high_update_rate
-system:touch_response_rate
-system:touch_rate_control
 "
 
 mkdir -p "$BASE" 2>/dev/null
@@ -331,29 +312,6 @@ apply_refresh_120() {
 }
 
 apply_touch_common() {
-    try settings put global high_touch_mode 1
-    try settings put secure miui_touch_boost 1
-    try settings put secure game_touch_mode 1
-    try settings put secure game_turbo_touch_sensitivity 3
-
-    try settings put global input.instant_touch_response 1
-    try settings put global input.touch_boost 1
-    try settings put system input.touch_boost 1
-
-    try settings put global touch.sampling_boost 1
-    try settings put global touch.polling_rate 240
-    try settings put global touch_sampling_rate_override 1
-    try settings put global touch_response_rate 1
-    try settings put global touch_rate_control 0
-    try settings put global windowsmgr.support_low_latency_touch 1
-
-    try settings put system touch_sampling_rate 240
-    try settings put system touch_sampling_rate_override 1
-    try settings put system devices_virtual_input_input1_polling_rate 240
-    try settings put system input.high_update_rate true
-    try settings put system touch_response_rate 1
-    try settings put system touch_rate_control 0
-
     try setprop debug.input.resampling false
     try setprop debug.input.touch_prediction false
     try setprop debug.velocitytracker.strategy impulse
@@ -492,16 +450,19 @@ daemon_loop() {
         LP="$(settings get global low_power 2>/dev/null)"
         [ -z "$LP" ] && LP="0"
 
-        if [ "$LP" != "$LAST" ]; then
-            if [ "$LP" = "1" ]; then
-                apply_saver_profile
-            else
-                apply_full_profile
-            fi
-            LAST="$LP"
+        if [ "$LP" = "1" ]; then
+            apply_touch_common
+            apply_events "$EVENTS_SAVER"
+            apply_grip "$GRIP_DEFAULT"
+            apply_roblox_game "$DOWN_FULL" "$FPS_SAVER"
         else
-            apply_roblox_priority
+            apply_touch_common
+            apply_events "$EVENTS_FULL"
+            apply_grip "$GRIP_DEFAULT"
+            apply_roblox_game "$DOWN_FULL" "$FPS_FULL"
         fi
+        apply_roblox_priority
+        LAST="$LP"
 
         sleep 15
     done
@@ -576,10 +537,12 @@ engage() {
 }
 
 fresh_reset() {
-    log "Fresh reset: stopping daemon and clearing v9.2 state only"
+    log "Fresh reset: stopping daemon and clearing stale v9.2 runtime/state files"
     stop_daemon_only
     stop_legacy_pidfiles
     rm -f "$STATE"
+    rm -f "$STATE.tmp"
+    rm -f "$PIDFILE"
     engage
 }
 
@@ -600,7 +563,10 @@ ensure_state_for_mode() {
 
 mode_events() {
     ensure_state_for_mode
+    apply_touch_common
     apply_events "$1"
+    apply_grip "$GRIP_DEFAULT"
+    apply_roblox_priority
     verify
 }
 
@@ -616,6 +582,33 @@ mode_grip() {
     ensure_state_for_mode
     apply_grip "$1"
     verify
+}
+
+mode_diag() {
+    verify
+}
+
+mode_gfx() {
+    PID="$(pidof "$GAME" 2>/dev/null | awk '{print $1}')"
+    if [ -n "$PID" ]; then
+        dumpsys gfxinfo "$GAME" 2>/dev/null | grep -E 'Total frames rendered|Janky frames|90th percentile|95th percentile|99th percentile|Number High input latency|Number Missed Vsync' | head -40
+    else
+        echo "Roblox not running; gfxinfo skipped."
+    fi
+}
+
+mode_thermal() {
+    dumpsys thermalservice 2>/dev/null | head -120
+}
+
+mode_probe() {
+    if [ -f "$BASE/scripts/rb_capability_probe_v1.sh" ]; then
+        sh "$BASE/scripts/rb_capability_probe_v1.sh"
+    elif [ -f "./scripts/rb_capability_probe_v1.sh" ]; then
+        sh "./scripts/rb_capability_probe_v1.sh"
+    else
+        echo "probe script not found: scripts/rb_capability_probe_v1.sh"
+    fi
 }
 
 verify() {
@@ -700,11 +693,17 @@ case "${1:-engage}" in
     events9999)
         mode_events 9999
         ;;
+    events1200)
+        mode_events 1200
+        ;;
     scale025)
         mode_scale 0.25
         ;;
     scale035)
         mode_scale 0.35
+        ;;
+    grip0)
+        mode_grip 0
         ;;
     grip90)
         mode_grip 90
@@ -714,6 +713,18 @@ case "${1:-engage}" in
         ;;
     grip150)
         mode_grip 150
+        ;;
+    probe)
+        mode_probe
+        ;;
+    diag)
+        mode_diag
+        ;;
+    gfx)
+        mode_gfx
+        ;;
+    thermal)
+        mode_thermal
         ;;
     killdaemon)
         stop_daemon_only
@@ -726,9 +737,10 @@ case "${1:-engage}" in
         echo "  sh $0 stop        # stop daemon and restore saved baseline"
         echo "  sh $0 verify"
         echo "  sh $0 full|saver"
-        echo "  sh $0 events480|events1600|events9999"
+        echo "  sh $0 events480|events1200|events1600|events9999"
         echo "  sh $0 scale025|scale035"
-        echo "  sh $0 grip90|grip120|grip150"
+        echo "  sh $0 grip0|grip90|grip120|grip150"
+        echo "  sh $0 probe|diag|gfx|thermal"
         ;;
 esac
 
