@@ -32,7 +32,7 @@ FPS_FULL="120"
 FPS_SAVER="60"
 EVENTS_FULL="1600"
 EVENTS_SAVER="480"
-GRIP_DEFAULT="90"
+GRIP_DEFAULT="0"
 
 RB_NULL="__RB_NULL__"
 RB_EMPTY="__RB_EMPTY__"
@@ -702,6 +702,9 @@ case "${1:-engage}" in
     scale035)
         mode_scale 0.35
         ;;
+    grip0)
+        mode_grip 0
+        ;;
     grip90)
         mode_grip 90
         ;;
@@ -736,7 +739,7 @@ case "${1:-engage}" in
         echo "  sh $0 full|saver"
         echo "  sh $0 events480|events1200|events1600|events9999"
         echo "  sh $0 scale025|scale035"
-        echo "  sh $0 grip90|grip120|grip150"
+        echo "  sh $0 grip0|grip90|grip120|grip150"
         echo "  sh $0 probe|diag|gfx|thermal"
         ;;
 esac
