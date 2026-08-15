@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# POCO F6 Pro Roblox 120 Hz Low-Latency Profile v2.0 MAX
+# POCO F6 Pro Roblox 120 Hz Low-Latency Profile v2.1 MAX
 # Target device: POCO F6 Pro / Snapdragon 8 Gen 2-class / HyperOS / Android shell
 # Target access: AXManager, QuickShell, Shizuku UID 2000. No root required.
 #
@@ -18,6 +18,7 @@
 # - Push an aggressive competitive 120 FPS/120 Hz Roblox profile where Android/GameManager supports it.
 # - Prefer lower render load, lower input delay, higher scheduler/performance hints, and less UI overhead.
 # - Add POCO/HyperOS/Game Turbo style keys that shell can write, while still saving values for restore.
+# - Shrink gesture interception zones and lower tap/touch delays as much as shell settings allow.
 #
 # Usage from the saved directory above:
 #   sh ./poco_f6_pro_roblox_120_low_latency.sh apply
@@ -84,6 +85,24 @@ system:display.disable_dynamic_fps
 system:display.disable_mitigated_fps
 system:display.defer_fps_frame_count
 system:display.enable_idle_content_fps_hint
+system:back_gesture_inset_scale_left
+system:back_gesture_inset_scale_right
+system:back_gesture_inset
+system:back_gesture_inset_left
+system:back_gesture_inset_right
+global:swipe_up_to_switch_apps_enabled
+system:one_handed_mode_enabled
+system:miui_one_handed_mode_type
+system:one_handed_mode_factor
+system:gesture_assist_enabled
+system:edge_suppression_size
+system:edge_touch_suppression
+system:touchpanel_edge_filter
+system:touchscreen_min_press_time
+system:long_press_timeout
+system:multi_press_timeout
+system:double_tap_timeout
+secure:long_press_timeout
 "
 
 PROPS_SAVE="
@@ -112,6 +131,11 @@ debug.hwui.use_partial_updates
 debug.hwui.use_hint_manager
 debug.hwui.render_ahead
 debug.egl.swap_interval
+debug.input.tap_timeout_ms
+debug.input.long_press_timeout_ms
+debug.input.double_tap_timeout_ms
+debug.input.edge_rejection
+debug.touch.pressure.scale
 persist.sys.perf_turbo_type
 "
 
@@ -278,10 +302,35 @@ apply_profile() {
     run settings put system touch_responsiveness 5
     run settings put system touch_boost_threshold 1
     run settings put system touch_response_rate 2
+    run settings put system touchscreen_min_press_time 0
+    run settings put system long_press_timeout 250
+    run settings put secure long_press_timeout 250
+    run settings put system multi_press_timeout 120
+    run settings put system double_tap_timeout 160
+    run setprop debug.input.tap_timeout_ms 0
+    run setprop debug.input.long_press_timeout_ms 250
+    run setprop debug.input.double_tap_timeout_ms 160
+    run setprop debug.touch.pressure.scale 0.001
     run settings put system show_touches 0
     run settings put system pointer_location 0
     run settings put system haptic_feedback_enabled 0
     run settings put system vibrate_on_touch 0
+
+    log "Killing gesture/edge interception that can steal Roblox touches"
+    run settings put system back_gesture_inset_scale_left 0
+    run settings put system back_gesture_inset_scale_right 0
+    run settings put system back_gesture_inset 0
+    run settings put system back_gesture_inset_left 0
+    run settings put system back_gesture_inset_right 0
+    run settings put global swipe_up_to_switch_apps_enabled 0
+    run settings put system one_handed_mode_enabled 0
+    run settings put system miui_one_handed_mode_type 0
+    run settings put system one_handed_mode_factor 0
+    run settings put system gesture_assist_enabled 0
+    run settings put system edge_suppression_size 0
+    run settings put system edge_touch_suppression 0
+    run settings put system touchpanel_edge_filter 0
+    run setprop debug.input.edge_rejection 0
 
     log "Applying selected compositor/render latency hints"
     run setprop debug.sf.disable_backpressure 1
@@ -349,6 +398,11 @@ verify_profile() {
     log "miui_game_perf:          $(settings get global miui_game_performance_mode 2>/dev/null)"
     log "gpu_perf_mode_sys:       $(settings get system gpu_perf_mode 2>/dev/null)"
     log "sf_disable_backpressure: $(getprop debug.sf.disable_backpressure 2>/dev/null)"
+    log "back_gesture_left:       $(settings get system back_gesture_inset_scale_left 2>/dev/null)"
+    log "back_gesture_right:      $(settings get system back_gesture_inset_scale_right 2>/dev/null)"
+    log "min_press_time:         $(settings get system touchscreen_min_press_time 2>/dev/null)"
+    log "long_press_timeout:     $(settings get system long_press_timeout 2>/dev/null)"
+    log "edge_rejection:         $(getprop debug.input.edge_rejection 2>/dev/null)"
     log "input_resampling:        $(getprop debug.input.resampling 2>/dev/null)"
     log "touch_prediction:        $(getprop debug.input.touch_prediction 2>/dev/null)"
     log "velocity_tracker:        $(getprop debug.velocitytracker.strategy 2>/dev/null)"
