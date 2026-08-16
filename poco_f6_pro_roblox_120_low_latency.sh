@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# POCO F6 Pro Roblox 120 Hz Low-Latency Profile v2.2 TAPSTORM MAX
+# POCO F6 Pro Roblox 120 Hz Low-Latency Profile v2.3 CHAIN-TAP MAX
 # Target device: POCO F6 Pro / Snapdragon 8 Gen 2-class / HyperOS / Android shell
 # Target access: AXManager, QuickShell, Shizuku UID 2000. No root required.
 #
@@ -19,7 +19,7 @@
 # - Prefer lower render load, lower input delay, higher scheduler/performance hints, and less UI overhead.
 # - Add POCO/HyperOS/Game Turbo style keys that shell can write, while still saving values for restore.
 # - Shrink gesture interception zones and lower tap/touch delays as much as shell settings allow.
-# - Bias input handling for 7-8+ taps per second so rapid repeated presses are less likely to be coalesced, filtered, or stolen by double-tap/long-press gestures.
+# - Bias input handling for 7-8+ taps per second so repeated tap-down/tap-up chains stay connected instead of feeling over-filtered or dropped.
 #
 # Usage from the saved directory above:
 #   sh ./poco_f6_pro_roblox_120_low_latency.sh apply
@@ -46,14 +46,15 @@ FPS_TARGET="120"
 DOWNSCALE_TARGET="0.75"
 MIN_REFRESH="120"
 PEAK_REFRESH="120"
-TOUCH_EVENTS="2000"
-# Do not set this extremely tiny: during a short Roblox frame hitch, too-low stale timeouts can discard taps.
-TOUCH_STALE_NS="200000000"
-TAP_TIMEOUT_MS="0"
-LONG_PRESS_TIMEOUT_MS="180"
-MULTI_PRESS_TIMEOUT_MS="60"
-DOUBLE_TAP_TIMEOUT_MS="80"
-TOUCH_SLOP_PX="2"
+TOUCH_EVENTS="3000"
+# Do not set this extremely tiny: during a short Roblox frame hitch, too-low stale timeouts can discard queued taps.
+TOUCH_STALE_NS="500000000"
+TAP_TIMEOUT_MS="1"
+LONG_PRESS_TIMEOUT_MS="300"
+MULTI_PRESS_TIMEOUT_MS="45"
+DOUBLE_TAP_TIMEOUT_MS="45"
+TOUCH_SLOP_PX="4"
+MAX_TAPS_PER_SEC="30"
 
 RB_NULL="__RB_NULL__"
 RB_EMPTY="__RB_EMPTY__"
@@ -152,6 +153,10 @@ debug.input.double_tap_timeout_ms
 debug.input.multi_press_timeout_ms
 debug.input.max_taps_per_sec
 debug.input.drop_repeat_taps
+debug.input.no_batching
+debug.input.disable_batching
+debug.inputdispatcher.disable_input_event_merge
+debug.inputdispatcher.skip_event_merge
 debug.input.edge_rejection
 debug.touch.pressure.scale
 persist.sys.perf_turbo_type
@@ -308,9 +313,13 @@ apply_profile() {
     run setprop debug.input.quiet_interval 0
     run setprop debug.input.touch_smooth 0
     run setprop debug.input.filter 0
+    run setprop debug.input.no_batching 1
+    run setprop debug.input.disable_batching 1
+    run setprop debug.inputdispatcher.disable_input_event_merge 1
+    run setprop debug.inputdispatcher.skip_event_merge 1
     run setprop debug.inputreader.lsq2_enabled 1
-    run setprop debug.input.resampling false
-    run setprop debug.input.touch_prediction false
+    run setprop debug.input.resampling true
+    run setprop debug.input.touch_prediction true
     run setprop debug.velocitytracker.strategy impulse
     run setprop debug.inputdispatcher.vsync 0
     run settings put system xiaomi_touch_sensitivity 3
@@ -323,8 +332,8 @@ apply_profile() {
     run settings put system touch_response_rate 2
     run settings put system touchscreen_min_press_time 0
     run settings put system tap_timeout "$TAP_TIMEOUT_MS"
-    run settings put system tap_duration 0
-    run settings put system touch_press_timeout 0
+    run settings put system tap_duration "$TAP_TIMEOUT_MS"
+    run settings put system touch_press_timeout "$TAP_TIMEOUT_MS"
     run settings put system long_press_timeout "$LONG_PRESS_TIMEOUT_MS"
     run settings put secure long_press_timeout "$LONG_PRESS_TIMEOUT_MS"
     run settings put system multi_press_timeout "$MULTI_PRESS_TIMEOUT_MS"
@@ -332,12 +341,12 @@ apply_profile() {
     run settings put system double_tap_timeout "$DOUBLE_TAP_TIMEOUT_MS"
     run settings put secure double_tap_timeout "$DOUBLE_TAP_TIMEOUT_MS"
     run setprop debug.input.tap_timeout_ms "$TAP_TIMEOUT_MS"
-    run setprop debug.input.tap_duration_ms 0
+    run setprop debug.input.tap_duration_ms "$TAP_TIMEOUT_MS"
     run setprop debug.input.min_press_time_ms 0
     run setprop debug.input.long_press_timeout_ms "$LONG_PRESS_TIMEOUT_MS"
     run setprop debug.input.double_tap_timeout_ms "$DOUBLE_TAP_TIMEOUT_MS"
     run setprop debug.input.multi_press_timeout_ms "$MULTI_PRESS_TIMEOUT_MS"
-    run setprop debug.input.max_taps_per_sec 20
+    run setprop debug.input.max_taps_per_sec "$MAX_TAPS_PER_SEC"
     run setprop debug.input.drop_repeat_taps 0
     run setprop debug.touch.pressure.scale 0.001
     run settings put system show_touches 0
@@ -345,7 +354,7 @@ apply_profile() {
     run settings put system haptic_feedback_enabled 0
     run settings put system vibrate_on_touch 0
 
-    log "Applying TAPSTORM rapid-tap profile: 7-8+ taps/sec, short double-tap window, low slop, no repeat-tap dropping"
+    log "Applying CHAIN-TAP profile: 7-8+ taps/sec, anti-batching, connected tap-up/tap-down chains, no repeat-tap dropping"
 
     log "Killing gesture/edge interception that can steal Roblox touches"
     run settings put system back_gesture_inset_scale_left 0
@@ -441,6 +450,8 @@ verify_profile() {
     log "edge_rejection:          $(getprop debug.input.edge_rejection 2>/dev/null)"
     log "max_taps_per_sec_prop:   $(getprop debug.input.max_taps_per_sec 2>/dev/null)"
     log "drop_repeat_taps_prop:   $(getprop debug.input.drop_repeat_taps 2>/dev/null)"
+    log "no_batching_prop:        $(getprop debug.input.no_batching 2>/dev/null)"
+    log "disable_merge_prop:     $(getprop debug.inputdispatcher.disable_input_event_merge 2>/dev/null)"
     log "input_resampling:        $(getprop debug.input.resampling 2>/dev/null)"
     log "touch_prediction:        $(getprop debug.input.touch_prediction 2>/dev/null)"
     log "velocity_tracker:        $(getprop debug.velocitytracker.strategy 2>/dev/null)"
