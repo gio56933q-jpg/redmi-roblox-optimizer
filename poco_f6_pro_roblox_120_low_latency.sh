@@ -1,24 +1,17 @@
 #!/system/bin/sh
-# POCO F6 Pro Roblox 120 Hz Low-Latency Profile v1.0
-# Target device: POCO F6 Pro / Snapdragon 8 Gen 2-class / HyperOS / Android shell
-# Target access: AXManager, QuickShell, Shizuku UID 2000. No root required.
+# POCO F6 Pro Roblox 120 Hz profile v1.1
+# Target: POCO F6 Pro, HyperOS/Android shell (AXManager, QuickShell, or Shizuku UID 2000).
 #
-# Goal:
-# - Prefer a stable 120 FPS/120 Hz Roblox session where Android GameManager supports it.
-# - Reduce input and UI latency without spoofing thermals or writing kernel/vendor nodes.
-# - Save changed settings so they can be restored later.
+# Reality: this phone's panel can present at most 120 distinct frames each second. Requesting
+# 200+ FPS cannot make a 120 Hz panel display 200 FPS and usually wastes thermal headroom.
+# Android shell cannot eliminate touch latency, alter the touch-controller scan rate, or bypass
+# Roblox/game-server frame caps. This profile removes avoidable OS scheduling/display limits only.
 #
-# Usage:
-#   sh poco_f6_pro_roblox_120_low_latency.sh apply
-#   sh poco_f6_pro_roblox_120_low_latency.sh verify
-#   sh poco_f6_pro_roblox_120_low_latency.sh restore
+# Usage: sh poco_f6_pro_roblox_120_low_latency.sh apply|verify|restore
 #
-# Notes:
-# - Shell/Shizuku cannot guarantee true 120 FPS. Roblox, the game place, thermal headroom,
-#   display mode, and OEM GameManager support decide the final result.
-# - This script intentionally avoids thermalservice override-status, device_config mutation,
-#   broad debug.sf/HWUI prop packs, network validation hacks, accessibility/location disabling,
-#   and any /sys or /proc writes.
+# The script deliberately does not use unsupported debug input properties, thermal overrides,
+# /sys or /proc writes, device_config changes, or vendor performance-service calls. Those are
+# either not persistent/effective from shell or trade device safety for unmeasurable claims.
 
 PKG="com.roblox.client"
 BASE="/storage/emulated/0/Download"
@@ -27,13 +20,9 @@ LOG="$BASE/$NAME.log"
 STATE="$BASE/$NAME.state"
 
 FPS_TARGET="120"
-DOWNSCALE_TARGET="0.85"
 MIN_REFRESH="120"
 PEAK_REFRESH="120"
-TOUCH_EVENTS="360"
-
 RB_NULL="__RB_NULL__"
-RB_EMPTY="__RB_EMPTY__"
 
 SETTINGS_SAVE="
 system:min_refresh_rate
@@ -43,97 +32,66 @@ system:miui_refresh_rate
 global:window_animation_scale
 global:transition_animation_scale
 global:animator_duration_scale
-system:haptic_feedback_enabled
-system:vibrate_on_touch
-system:show_touches
-system:pointer_location
 global:low_power
 global:low_power_sticky
 "
 
-PROPS_SAVE="
-debug.inputdispatcher.max_events_per_sec
-debug.input.resampling
-debug.input.touch_prediction
-debug.velocitytracker.strategy
-debug.inputdispatcher.vsync
-"
-
 mkdir -p "$BASE" 2>/dev/null
 
-log() {
-    echo "$(date '+%F %T') $*" | tee -a "$LOG"
-}
+log() { echo "$(date '+%F %T') $*" | tee -a "$LOG"; }
 
 run() {
     "$@" >>"$LOG" 2>&1
     rc=$?
-    [ "$rc" -ne 0 ] && log "WARN[$rc]: $*"
-    return 0
+    [ "$rc" -eq 0 ] || log "WARN[$rc]: $*"
+    return "$rc"
+}
+
+state_has() {
+    key="$1"
+    [ -f "$STATE" ] && awk -F= -v k="$key" 'index($0,k"=")==1 { found=1 } END { exit !found }' "$STATE" 2>/dev/null
 }
 
 state_set() {
     key="$1"
     value="$2"
     [ -f "$STATE" ] || : >"$STATE"
-    awk -F= -v k="$key" 'index($0,k"=")!=1{print}' "$STATE" >"$STATE.tmp" 2>/dev/null && mv "$STATE.tmp" "$STATE"
+    awk -F= -v k="$key" 'index($0,k"=")!=1 { print }' "$STATE" >"$STATE.tmp" 2>/dev/null && mv "$STATE.tmp" "$STATE"
     printf '%s=%s\n' "$key" "$value" >>"$STATE"
 }
 
 state_get() {
     key="$1"
     [ -f "$STATE" ] || return 1
-    awk -F= -v k="$key" 'index($0,k"=")==1{sub("^[^=]*=",""); print; exit}' "$STATE" 2>/dev/null
+    awk -F= -v k="$key" 'index($0,k"=")==1 { sub("^[^=]*=", ""); print; exit }' "$STATE" 2>/dev/null
 }
 
-save_setting() {
+# Preserve the pre-first-apply value. Re-running apply must not overwrite the restore point.
+save_setting_once() {
     ns="$1"
     key="$2"
+    state_key="setting.$ns.$key"
+    state_has "$state_key" && return 0
     cur="$(settings get "$ns" "$key" 2>/dev/null)"
-    [ "$cur" = "null" ] && cur="$RB_NULL"
-    [ -z "$cur" ] && cur="$RB_EMPTY"
-    state_set "setting.$ns.$key" "$cur"
+    [ "$cur" = "null" ] || [ -n "$cur" ] || cur="$RB_NULL"
+    state_set "$state_key" "$cur"
 }
 
 restore_setting() {
     ns="$1"
     key="$2"
     saved="$(state_get "setting.$ns.$key")"
-    [ -z "$saved" ] && return 0
-    case "$saved" in
-        "$RB_NULL") run settings delete "$ns" "$key" ;;
-        "$RB_EMPTY") run settings put "$ns" "$key" "" ;;
-        *) run settings put "$ns" "$key" "$saved" ;;
-    esac
-}
-
-save_prop() {
-    key="$1"
-    cur="$(getprop "$key" 2>/dev/null)"
-    [ -z "$cur" ] && cur="$RB_EMPTY"
-    state_set "prop.$key" "$cur"
-}
-
-restore_prop() {
-    key="$1"
-    saved="$(state_get "prop.$key")"
-    [ -z "$saved" ] && return 0
-    if [ "$saved" = "$RB_EMPTY" ]; then
-        run setprop "$key" ""
+    [ -n "$saved" ] || return 0
+    if [ "$saved" = "$RB_NULL" ]; then
+        run settings delete "$ns" "$key"
     else
-        run setprop "$key" "$saved"
+        run settings put "$ns" "$key" "$saved"
     fi
 }
 
 save_state() {
-    log "Saving current settings/properties to $STATE"
     for item in $SETTINGS_SAVE; do
-        ns="${item%%:*}"
-        key="${item#*:}"
-        save_setting "$ns" "$key"
-    done
-    for key in $PROPS_SAVE; do
-        save_prop "$key"
+        save_setting_once "${item%%:*}" "${item#*:}"
     done
 }
 
@@ -145,22 +103,17 @@ check_package() {
 }
 
 apply_profile() {
-    log "=== POCO F6 Pro Roblox 120 Hz low-latency apply ==="
+    log "=== POCO F6 Pro Roblox 120 Hz profile: apply ==="
     check_package
     save_state
 
-    log "Keeping Roblox active in the background and idle whitelist"
-    run appops set "$PKG" RUN_IN_BACKGROUND allow
-    run appops set "$PKG" RUN_ANY_IN_BACKGROUND allow
-    run appops set "$PKG" WAKE_LOCK allow
-    run am set-standby-bucket "$PKG" active
-    run cmd deviceidle whitelist +"$PKG"
+    # 1.0 downscale retains native render resolution; do not sacrifice clarity on an 8 Gen 2
+    # device unless a specific Roblox experience fails the 120-FPS stability test.
+    log "Requesting GameManager custom mode: ${FPS_TARGET} FPS, native scale"
+    run cmd game mode custom "$PKG"
+    run cmd game set --downscale 1.0 --fps "$FPS_TARGET" "$PKG"
 
-    log "Applying Android GameManager performance target: ${FPS_TARGET} FPS, ${DOWNSCALE_TARGET} downscale"
-    run cmd game mode performance "$PKG"
-    run cmd game set --downscale "$DOWNSCALE_TARGET" --fps "$FPS_TARGET" "$PKG"
-
-    log "Requesting fixed 120 Hz display and disabling launcher/UI animations"
+    log "Requesting 120 Hz and disabling Android UI animations / Battery Saver"
     run settings put system min_refresh_rate "$MIN_REFRESH"
     run settings put system peak_refresh_rate "$PEAK_REFRESH"
     run settings put system user_refresh_rate "$PEAK_REFRESH"
@@ -171,63 +124,34 @@ apply_profile() {
     run settings put global low_power 0
     run settings put global low_power_sticky 0
 
-    log "Applying conservative input latency hints"
-    run setprop debug.inputdispatcher.max_events_per_sec "$TOUCH_EVENTS"
-    run setprop debug.input.resampling false
-    run setprop debug.input.touch_prediction false
-    run setprop debug.velocitytracker.strategy impulse
-    run setprop debug.inputdispatcher.vsync 1
-    run settings put system show_touches 0
-    run settings put system pointer_location 0
-    run settings put system haptic_feedback_enabled 0
-    run settings put system vibrate_on_touch 0
-
     log "Compiling Roblox with speed-profile"
     run cmd package compile -m speed-profile -f "$PKG"
 
-    log "Resetting any previous thermal spoof instead of overriding thermals"
-    run cmd thermalservice reset
-
     verify_profile
-    log "Apply complete. For best stability: use a cooler/fan, avoid charging, lower brightness, and test the same Roblox place for 10+ minutes."
+    log "Applied. Validate in the same experience for 15 minutes without charging; if frame time rises, reduce Roblox graphics before lowering refresh rate."
 }
 
 restore_profile() {
-    log "=== POCO F6 Pro Roblox restore ==="
+    log "=== POCO F6 Pro Roblox profile: restore ==="
     for item in $SETTINGS_SAVE; do
-        ns="${item%%:*}"
-        key="${item#*:}"
-        restore_setting "$ns" "$key"
-    done
-    for key in $PROPS_SAVE; do
-        restore_prop "$key"
+        restore_setting "${item%%:*}" "${item#*:}"
     done
     run cmd game reset "$PKG"
-    run cmd deviceidle whitelist -"$PKG"
-    run am set-standby-bucket "$PKG" working_set
-    run cmd thermalservice reset
-    log "Restore complete."
+    rm -f "$STATE"
+    log "Restore complete. GameManager settings were reset to their platform defaults."
 }
 
 verify_profile() {
-    log "=== Verify ==="
-    log "package:                 $PKG"
-    log "standby_bucket:          $(am get-standby-bucket "$PKG" 2>/dev/null)"
-    log "RUN_IN_BACKGROUND:       $(appops get "$PKG" RUN_IN_BACKGROUND 2>/dev/null)"
-    log "RUN_ANY_IN_BACKGROUND:   $(appops get "$PKG" RUN_ANY_IN_BACKGROUND 2>/dev/null)"
-    log "WAKE_LOCK:               $(appops get "$PKG" WAKE_LOCK 2>/dev/null)"
-    log "min_refresh_rate:        $(settings get system min_refresh_rate 2>/dev/null)"
-    log "peak_refresh_rate:       $(settings get system peak_refresh_rate 2>/dev/null)"
-    log "user_refresh_rate:       $(settings get system user_refresh_rate 2>/dev/null)"
-    log "miui_refresh_rate:       $(settings get system miui_refresh_rate 2>/dev/null)"
-    log "animation_scale:         $(settings get global window_animation_scale 2>/dev/null)"
-    log "touch_events:            $(getprop debug.inputdispatcher.max_events_per_sec 2>/dev/null)"
-    log "input_resampling:        $(getprop debug.input.resampling 2>/dev/null)"
-    log "touch_prediction:        $(getprop debug.input.touch_prediction 2>/dev/null)"
-    log "velocity_tracker:        $(getprop debug.velocitytracker.strategy 2>/dev/null)"
-    log "haptic_feedback:         $(settings get system haptic_feedback_enabled 2>/dev/null)"
-    log "vibrate_on_touch:        $(settings get system vibrate_on_touch 2>/dev/null)"
-    timeout 3 dumpsys game 2>/dev/null | grep -i -A 10 "$PKG" | tee -a "$LOG" >/dev/null || log "GameManager dump did not show $PKG or timed out."
+    log "=== Verify (requested values, not an FPS guarantee) ==="
+    log "package:           $PKG"
+    log "min_refresh_rate:  $(settings get system min_refresh_rate 2>/dev/null)"
+    log "peak_refresh_rate: $(settings get system peak_refresh_rate 2>/dev/null)"
+    log "user_refresh_rate: $(settings get system user_refresh_rate 2>/dev/null)"
+    log "miui_refresh_rate: $(settings get system miui_refresh_rate 2>/dev/null)"
+    log "battery_saver:     $(settings get global low_power 2>/dev/null)"
+    log "animation_scale:   $(settings get global window_animation_scale 2>/dev/null)"
+    timeout 3 dumpsys game 2>/dev/null | grep -i -A 10 "$PKG" | tee -a "$LOG" >/dev/null || log "WARN: GameManager readback unavailable. Check 'cmd game help' on this HyperOS build."
+    timeout 3 dumpsys SurfaceFlinger 2>/dev/null | grep -E 'activeMode=|renderRate=|GameFrameRateOverrides' | head -20 | tee -a "$LOG" >/dev/null || log "WARN: SurfaceFlinger refresh readback unavailable."
 }
 
 case "$1" in
@@ -236,7 +160,6 @@ case "$1" in
     verify|status) verify_profile ;;
     *)
         echo "Usage: sh $0 apply|verify|restore"
-        echo "Recommended first run: sh $0 apply"
         exit 2
         ;;
 esac
